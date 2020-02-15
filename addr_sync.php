@@ -1,14 +1,23 @@
 #!/usr/bin/php
 
 <?php
+/**
+ * mysql with Nextcloud contacts app syncer
+ *
+ * @link https://github.com/drlight17/mysql-nextcloud-contacts-syncer
+ * @author Samoilov Yuri
+ * @version 0.1.2
+*/
+
 include("db-connect.inc"); // access db
 include("vCard.php"); // for vcard parsing
 
-//***********set config variables**************
+//***********set config variables************
 $db_src=$mysql_connect['tbl_src'];
 $db_dst=$mysql_connect['tbl_dst'];      //cards
 $db_dst_2=$mysql_connect['tbl_dst_2']; //cards_properties
 $db_dst_3=$mysql_connect['tbl_dst_3']; //addressbookchanges
+$db_dst_4=$mysql_connect['tbl_dst_4']; //addressbooks
 $db_mail=$mysql_connect['db_mail'];
 $db_cloud=$mysql_connect['db_cloud'];
 $host=$mysql_connect['host'];
@@ -17,7 +26,7 @@ $passwd=$mysql_connect['pass'];
 $addressbookid=23;
 $temp_file='temp.vcf';
 $log="/var/log/addr_sync.log";
-//********************************************
+//******************************************
 
 function create_vcard($last_name,$first_name,$middle_name,$display_name,$categories,$organization,$job_title,$work_phone,$primary_email,$uid,$user_photo,$rev){
 return
@@ -54,7 +63,7 @@ function OutputvCard(vCard $vCard)
         }
     }
 
-function add_new ($addressbookid, $select_query_mail, $host, $user, $passwd, $db_cloud, $db_dst, $db_dst_2, $db_dst_3, $log) {
+function add_new ($addressbookid, $select_query_mail, $host, $user, $passwd, $db_cloud, $db_dst, $db_dst_2, $db_dst_3, $db_dst_4, $log) {
     $w=fopen($log,'a');
     while ($select_array = mysqli_fetch_array($select_query_mail, MYSQLI_ASSOC)) {
         //echo "flag!";
@@ -98,7 +107,7 @@ function add_new ($addressbookid, $select_query_mail, $host, $user, $passwd, $db
                 $insert_2="INSERT INTO ".$db_cloud.".".$db_dst_2." (`id`,`addressbookid`,`cardid`,`name`, `value`, `preferred`) VALUES"."(NULL, '".$addressbookid."','".$cardid."','".$name."','".$value."',0)";
                 $insert_query_2=mysqli_query($link_db, $insert_2) or die("Query failed");
             }
-            $select_2="SELECT synctoken from ".$db_cloud.".oc_addressbooks WHERE id='".$addressbookid."'";
+            $select_2="SELECT synctoken from ".$db_cloud.".".$db_dst_4." WHERE id='".$addressbookid."'";
             $select_query_2=mysqli_query($link_db, $select_2) or die("Query failed");
             while ($select_array_2 = mysqli_fetch_array($select_query_2, MYSQLI_ASSOC)) {
                 $synctoken=$select_array_2["synctoken"];
@@ -107,9 +116,9 @@ function add_new ($addressbookid, $select_query_mail, $host, $user, $passwd, $db
             $insert_3="INSERT INTO ".$db_cloud.".".$db_dst_3." (`uri`,`synctoken`,`addressbookid`,`operation`) VALUES"."('".$uri."','".$synctoken."', '".$addressbookid."', 1)";
             $insert_query_3=mysqli_query($link_db, $insert_3) or die("Query failed");
             $synctoken+=1;
-            $update="UPDATE ".$db_cloud.".oc_addressbooks SET synctoken='".$synctoken."' WHERE id='".$addressbookid."'";
+            $update="UPDATE ".$db_cloud.".".$db_dst_4." SET synctoken='".$synctoken."' WHERE id='".$addressbookid."'";
             $update_query=mysqli_query($link_db, $update) or die("Query failed");
-            fwrite($w,(date(DATE_RFC822))); 
+            fwrite($w,(date(DATE_RFC822)));
             fwrite($w," добавлен новый пользователь ".$display_name." с адресом ".$primary_email. "\n");
             mysqli_close($link_db);
         }
@@ -147,7 +156,7 @@ function get_all_contacts_cloud ($addressbookid, $host, $user, $passwd, $db_clou
     return $select_query;
 }
 
-function delete_nonexistent ($addressbookid, $temp_file, $host, $user, $passwd, $db_mail, $db_cloud, $db_src, $db_dst, $db_dst_3, $log) {
+function delete_nonexistent ($addressbookid, $temp_file, $host, $user, $passwd, $db_mail, $db_cloud, $db_src, $db_dst, $db_dst_3, $db_dst_4, $log) {
     $email_string='';
 
     $select_query_mail = get_all_contacts_mail($host, $user, $passwd, $db_mail, $db_src);
@@ -186,7 +195,7 @@ $w=fopen($log,'a');
                         $uri=$select_array_3["uri"];
                     };
 
-                    $select_2="SELECT synctoken from ".$db_cloud.".oc_addressbooks WHERE id='".$addressbookid."'";
+                    $select_2="SELECT synctoken from ".$db_cloud.".".$db_dst_4." WHERE id='".$addressbookid."'";
                     $select_query_2=mysqli_query($link_db, $select_2) or die("Query failed");
                     while ($select_array_2 = mysqli_fetch_array($select_query_2, MYSQLI_ASSOC)) {
                         $synctoken=$select_array_2["synctoken"];
@@ -201,7 +210,7 @@ $w=fopen($log,'a');
 
                     $synctoken+=1;
 
-                    $update="UPDATE ".$db_cloud.".oc_addressbooks SET synctoken='".$synctoken."' WHERE id='".$addressbookid."'";
+                    $update="UPDATE ".$db_cloud.".".$db_dst_4." SET synctoken='".$synctoken."' WHERE id='".$addressbookid."'";
                     $update_query=mysqli_query($link_db, $update) or die("Query failed");
 
                     mysqli_close($link_db);
@@ -244,17 +253,17 @@ else {
 //***********************************************************************************************
 $w=fopen($log,'a');
 fwrite($w,"Запущена синхронизация ".(date(DATE_RFC822))."\n");
-fclose($w); 
+fclose($w);
 
 $select_query_cloud = get_all_contacts_cloud($addressbookid, $host, $user, $passwd, $db_cloud, $db_dst);
 
 create_temp_file($temp_file,$select_query_cloud);
 
-delete_nonexistent ($addressbookid, $temp_file, $host, $user, $passwd, $db_mail, $db_cloud, $db_src, $db_dst, $db_dst_3, $log);
+delete_nonexistent ($addressbookid, $temp_file, $host, $user, $passwd, $db_mail, $db_cloud, $db_src, $db_dst, $db_dst_3, $db_dst_4, $log);
 
 $select_query_mail = get_all_contacts_mail($host, $user, $passwd, $db_mail, $db_src);
 
-add_new($addressbookid, $select_query_mail, $host, $user, $passwd, $db_cloud, $db_dst, $db_dst_2, $db_dst_3, $log);
+add_new($addressbookid, $select_query_mail, $host, $user, $passwd, $db_cloud, $db_dst, $db_dst_2, $db_dst_3, $db_dst_4, $log);
 
 delete_temp_file($temp_file);
 
