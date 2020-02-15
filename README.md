@@ -5,5 +5,7 @@ In order this script to work there must be a vcard parser class from Martins Pil
 https://github.com/nuovo/vCard-parser in the same directory as addr_sync.php
 
 addr_sync.php - main script
+
 db-connect.inc - for database connection configuration
+
 vCard.php - class from Martins Pilsetnieks, Roberts Bruveris https://github.com/nuovo/vCard-parser
