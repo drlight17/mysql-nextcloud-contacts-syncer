@@ -4,7 +4,7 @@
 include("db-connect.inc"); // access db
 include("vCard.php"); // for vcard parsing
 
-//***********set config variables************
+//***********set config variables**************
 $db_src=$mysql_connect['tbl_src'];
 $db_dst=$mysql_connect['tbl_dst'];      //cards
 $db_dst_2=$mysql_connect['tbl_dst_2']; //cards_properties
@@ -17,7 +17,7 @@ $passwd=$mysql_connect['pass'];
 $addressbookid=23;
 $temp_file='temp.vcf';
 $log="/var/log/addr_sync.log";
-//******************************************
+//********************************************
 
 function create_vcard($last_name,$first_name,$middle_name,$display_name,$categories,$organization,$job_title,$work_phone,$primary_email,$uid,$user_photo,$rev){
 return
