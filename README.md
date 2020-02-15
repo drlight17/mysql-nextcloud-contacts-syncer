@@ -4,3 +4,6 @@ This is my implementation of sync script between my mail mysql database for mail
 In order this script to work there must be a vcard parser class from Martins Pilsetnieks, Roberts Bruveris 
 https://github.com/nuovo/vCard-parser in the same directory as addr_sync.php
 
+addr_sync.php - main script
+db-connect.inc - for database connection configuration
+vCard.php - class from Martins Pilsetnieks, Roberts Bruveris https://github.com/nuovo/vCard-parser
