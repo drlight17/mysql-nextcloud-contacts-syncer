@@ -6,11 +6,12 @@
  *
  * @link https://github.com/drlight17/mysql-nextcloud-contacts-syncer
  * @author Samoilov Yuri
- * @version 0.1.2
+ * @version 0.1.3
 */
 
 include("db-connect.inc"); // access db
 include("vCard.php"); // for vcard parsing
+error_reporting(0);
 
 //***********set config variables************
 $db_src=$mysql_connect['tbl_src'];
@@ -26,7 +27,25 @@ $passwd=$mysql_connect['pass'];
 $addressbookid=23;
 $temp_file='temp.vcf';
 $log="/var/log/addr_sync.log";
+// ldap settings
+$srv = "dc.example.loc"; // ldap server address
+$uname = "user@dc.example.loc"; // ldap username with read permissions
+$upasswd = "password"; // ldap user password
+$dn = "dc=example,dc=loc"; // ldap main DN
 //******************************************
+
+function get_ldap_photo () {
+    $search = "(&(jpegPhoto=*))";
+    global $srv, $uname, $upasswd, $dn;
+    $ds=ldap_connect($srv);
+    if (!$ds) die("error connect to LDAP server $srv");
+    $r=ldap_bind($ds, $uname, $upasswd);
+    if (!$r) die("error bind!");
+    $sr=ldap_search($ds, $dn, iconv("utf-8", "cp1251" ,$search), array('mail','jpegphoto'));
+    if (!$sr) die("search error!");
+    $info = ldap_get_entries($ds, $sr);
+    return $info;
+}
 
 function create_vcard($last_name,$first_name,$middle_name,$display_name,$categories,$organization,$job_title,$work_phone,$primary_email,$uid,$user_photo,$rev){
 return
@@ -63,9 +82,10 @@ function OutputvCard(vCard $vCard)
         }
     }
 
-function add_new ($addressbookid, $select_query_mail, $host, $user, $passwd, $db_cloud, $db_dst, $db_dst_2, $db_dst_3, $db_dst_4, $log) {
+function add_new ($ldap_array, $addressbookid, $select_query_mail, $host, $user, $passwd, $db_cloud, $db_dst, $db_dst_2, $db_dst_3, $db_dst_4, $log) {
     $w=fopen($log,'a');
     while ($select_array = mysqli_fetch_array($select_query_mail, MYSQLI_ASSOC)) {
+        $user_photo="";
         //echo "flag!";
         // uid generator
         $uid=bin2hex(random_bytes(4))."-".bin2hex(random_bytes(2))."-".bin2hex(random_bytes(2))."-".bin2hex(random_bytes(2))."-".bin2hex(random_bytes(6));
@@ -83,7 +103,15 @@ function add_new ($addressbookid, $select_query_mail, $host, $user, $passwd, $db
         $job_title=$select_array["job_title"];
         $work_phone=$select_array["work_phone"];
         $primary_email=$select_array["primary_email"];
-        $user_photo=$select_array["user_photo"];
+        foreach($ldap_array as $ldap_array_element){
+            if ($primary_email==$ldap_array_element["mail"][0]) {
+                $user_photo="ENCODING=b;TYPE=png:".base64_encode($ldap_array_element["jpegphoto"][0]);
+            };
+        };
+        if ($user_photo=="") {
+//          $user_photo=$select_array["user_photo"];
+            $user_photo="ENCODING=b;TYPE=png:nothing";
+        };
         $vcard=create_vcard($last_name,$first_name,$middle_name,$display_name,$categories,$organization,$job_title,$work_phone,$primary_email,$uid,$user_photo,$rev);
         $vcard_array= array(
             "N" => $last_name.";".$first_name.";".$middle_name.";;",
@@ -93,6 +121,7 @@ function add_new ($addressbookid, $select_query_mail, $host, $user, $passwd, $db
             "TITLE"  => $job_title,
             "TEL"  => $work_phone,
             "EMAIL"  => $primary_email,
+//            "PHOTO"  => $user_photo,
             "UID"  => $uid,
         );
         // etag generator
@@ -255,15 +284,17 @@ $w=fopen($log,'a');
 fwrite($w,"Запущена синхронизация ".(date(DATE_RFC822))."\n");
 fclose($w);
 
+$ldap_array = get_ldap_photo();
+
+$select_query_mail = get_all_contacts_mail($host, $user, $passwd, $db_mail, $db_src);
+
+add_new($ldap_array, $addressbookid, $select_query_mail, $host, $user, $passwd, $db_cloud, $db_dst, $db_dst_2, $db_dst_3, $db_dst_4, $log);
+
 $select_query_cloud = get_all_contacts_cloud($addressbookid, $host, $user, $passwd, $db_cloud, $db_dst);
 
 create_temp_file($temp_file,$select_query_cloud);
 
 delete_nonexistent ($addressbookid, $temp_file, $host, $user, $passwd, $db_mail, $db_cloud, $db_src, $db_dst, $db_dst_3, $db_dst_4, $log);
-
-$select_query_mail = get_all_contacts_mail($host, $user, $passwd, $db_mail, $db_src);
-
-add_new($addressbookid, $select_query_mail, $host, $user, $passwd, $db_cloud, $db_dst, $db_dst_2, $db_dst_3, $db_dst_4, $log);
 
 delete_temp_file($temp_file);
 
