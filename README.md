@@ -9,3 +9,5 @@ addr_sync.php - main script
 db-connect.inc - for database connection configuration
 
 vCard.php - class from Martins Pilsetnieks, Roberts Bruveris https://github.com/nuovo/vCard-parser
+
+photo_update.php - script for ldap jpegPhoto attribute sync with Nextcloud and main mail db
