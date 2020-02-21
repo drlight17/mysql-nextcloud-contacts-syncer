@@ -6,7 +6,7 @@
  *
  * @link https://github.com/drlight17/mysql-nextcloud-contacts-syncer
  * @author Samoilov Yuri
- * @version 0.1.3
+ * @version 0.1.4
 */
 
 include("db-connect.inc"); // access db
@@ -158,7 +158,7 @@ function add_new ($ldap_array, $addressbookid, $select_query_mail, $host, $user,
 
 function check_existence ($addressbookid, $host, $user, $passwd, $db_cloud, $db_dst, $primary_email) {
     $link_db=connect_to_db ($host, $user, $passwd);
-    $check="SELECT * FROM ".$db_cloud.".".$db_dst." WHERE carddata LIKE '%".$primary_email."%' AND addressbookid='".$addressbookid."'";
+    $check="SELECT * FROM ".$db_cloud.".".$db_dst." WHERE carddata LIKE '%EMAIL;TYPE=\"HOME,INTERNET,pref\":".$primary_email."%' AND addressbookid='".$addressbookid."'";
     $check_query=mysqli_query($link_db, $check) or die("Query failed");
     $check_array = mysqli_fetch_array($check_query, MYSQLI_ASSOC);
     if (mysqli_affected_rows($link_db)==0) {
@@ -187,17 +187,19 @@ function get_all_contacts_cloud ($addressbookid, $host, $user, $passwd, $db_clou
 
 function delete_nonexistent ($addressbookid, $temp_file, $host, $user, $passwd, $db_mail, $db_cloud, $db_src, $db_dst, $db_dst_3, $db_dst_4, $log) {
     $email_string='';
-
+    $i=0;
+    $j=0;
     $select_query_mail = get_all_contacts_mail($host, $user, $passwd, $db_mail, $db_src);
 
 $w=fopen($log,'a');
 
     while ($select_array = mysqli_fetch_array($select_query_mail, MYSQLI_ASSOC)) {
-        $email_string.=$select_array["primary_email"];
+        $email_string.=";".$select_array["primary_email"].";";
     };
 
 
     $vCard = new vCard($temp_file);
+    //echo $email_string;
     if (count($vCard) == 0)
         {
             throw new Exception('vCard test: empty vCard!');
@@ -211,14 +213,18 @@ $w=fopen($log,'a');
         else
         {
             foreach ($vCard as $Index => $vCardPart)
-            {
-                if(strpos($email_string,OutputvCard($vCardPart)) !== false){
-                    //$i=$i+1;
+            {   //echo OutputvCard($vCardPart)."\n";
+                $template=";".OutputvCard($vCardPart).";";
+                if(strpos($email_string,$template) !== false){
+                    $i=$i+1;
+
                 } else {
-                    //$j=$j+1;
+                    $j=$j+1;
+
                     $link_db=connect_to_db ($host, $user, $passwd);
 
-                    $select_3="SELECT uri FROM ".$db_cloud.".".$db_dst." WHERE carddata LIKE '%".OutputvCard($vCardPart)."%' AND addressbookid='".$addressbookid."'";
+                    $select_3="SELECT uri FROM ".$db_cloud.".".$db_dst." WHERE carddata LIKE '%EMAIL;TYPE=\"HOME,INTERNET,pref\":".OutputvCard($vCardPart)."%' AND addressbookid='".$addressbookid."'";
+                    //echo $select_3;
                     $select_query_3=mysqli_query($link_db, $select_3) or die("Query failed");
                     while ($select_array_3 = mysqli_fetch_array($select_query_3, MYSQLI_ASSOC)) {
                         $uri=$select_array_3["uri"];
@@ -230,7 +236,7 @@ $w=fopen($log,'a');
                         $synctoken=$select_array_2["synctoken"];
                     };
 
-                    $delete="DELETE FROM ".$db_cloud.".".$db_dst." WHERE carddata LIKE '%".OutputvCard($vCardPart)."%' AND addressbookid='".$addressbookid."'";
+                    $delete="DELETE FROM ".$db_cloud.".".$db_dst." WHERE carddata LIKE '%EMAIL;TYPE=\"HOME,INTERNET,pref\":".OutputvCard($vCardPart)."%' AND addressbookid='".$addressbookid."'";
                     $delete_query=mysqli_query($link_db, $delete) or die("Query failed");
 
                     // operations: 1 - add, 2 - modify, 3 - delete
@@ -248,6 +254,8 @@ $w=fopen($log,'a');
 
                 }
             }
+//          echo "remained: ".$i."\n";
+//          echo "deleted: ".$j."\n";
         }
     fclose($w);
 
