@@ -6,12 +6,12 @@
  *
  * @link https://github.com/drlight17/mysql-nextcloud-contacts-syncer
  * @author Samoilov Yuri
- * @version 0.1.4
+ * @version 0.2
 */
 
 include("db-connect.inc"); // access db
 include("vCard.php"); // for vcard parsing
-error_reporting(0);
+//error_reporting(0);
 
 //***********set config variables************
 $db_src=$mysql_connect['tbl_src'];
@@ -82,17 +82,20 @@ function OutputvCard(vCard $vCard)
         }
     }
 
-function add_new ($ldap_array, $addressbookid, $select_query_mail, $host, $user, $passwd, $db_cloud, $db_dst, $db_dst_2, $db_dst_3, $db_dst_4, $log) {
+function add_or_update ($ldap_array, $addressbookid, $select_query_mail, $host_cloud, $user, $passwd, $db_cloud, $db_dst, $db_dst_2, $db_dst_3, $db_dst_4, $log) {
     $w=fopen($log,'a');
     while ($select_array = mysqli_fetch_array($select_query_mail, MYSQLI_ASSOC)) {
-        $user_photo="";
+    $user_photo="";
         //echo "flag!";
         // uid generator
         $uid=bin2hex(random_bytes(4))."-".bin2hex(random_bytes(2))."-".bin2hex(random_bytes(2))."-".bin2hex(random_bytes(2))."-".bin2hex(random_bytes(6));
         $uri=strtoupper($uid).".vcf";
         // timestamp generator
-        //$lastmodified=date_timestamp_get(date_create());
-        $lastmodified=time();
+
+        //$lastmodified=time(); //current timestamp
+        $last_update_exim=strtotime($select_array["last_update"]); // exim human readable time convert to timestamp
+        $lastmodified=$last_update_exim; // sync cloud lastmodified with exim last_update
+        //echo $last_update_exim;
         $rev=gmdate('Ymd')."T".gmdate('His')."Z";
         $last_name=$select_array["last_name"];
         $first_name=$select_array["first_name"];
@@ -103,15 +106,15 @@ function add_new ($ldap_array, $addressbookid, $select_query_mail, $host, $user,
         $job_title=$select_array["job_title"];
         $work_phone=$select_array["work_phone"];
         $primary_email=$select_array["primary_email"];
-        foreach($ldap_array as $ldap_array_element){
-            if ($primary_email==$ldap_array_element["mail"][0]) {
-                $user_photo="ENCODING=b;TYPE=png:".base64_encode($ldap_array_element["jpegphoto"][0]);
-            };
+    foreach($ldap_array as $ldap_array_element){
+        if ($primary_email==$ldap_array_element["mail"][0]) {
+        $user_photo="ENCODING=b;TYPE=png:".base64_encode($ldap_array_element["jpegphoto"][0]);
         };
-        if ($user_photo=="") {
+    };
+    if ($user_photo=="") {
 //          $user_photo=$select_array["user_photo"];
-            $user_photo="ENCODING=b;TYPE=png:nothing";
-        };
+        $user_photo="ENCODING=b;TYPE=png:nothing";
+    };
         $vcard=create_vcard($last_name,$first_name,$middle_name,$display_name,$categories,$organization,$job_title,$work_phone,$primary_email,$uid,$user_photo,$rev);
         $vcard_array= array(
             "N" => $last_name.";".$first_name.";".$middle_name.";;",
@@ -127,8 +130,13 @@ function add_new ($ldap_array, $addressbookid, $select_query_mail, $host, $user,
         // etag generator
         $etag = md5($vcard);
         $size = strlen($vcard);
-        if (check_existence($addressbookid, $host, $user, $passwd, $db_cloud, $db_dst, $primary_email)) {
-            $link_db=connect_to_db ($host, $user, $passwd);
+        /*if (check_existence($addressbookid, $host_cloud, $user, $passwd, $db_cloud, $db_dst, $primary_email, $last_update_exim)) {*/
+        $check_result = check_existence($addressbookid, $host_cloud, $user, $passwd, $db_cloud, $db_dst, $primary_email);
+        //echo $check_result[0];
+        if ($check_result[0]===true) {
+            // add record
+            //echo "add of user!";
+            $link_db=connect_to_db ($host_cloud, $user, $passwd);
             $insert="INSERT INTO ".$db_cloud.".".$db_dst." (`addressbookid`,`carddata`,`uri`, `lastmodified`, `etag`, `size`, `uid`) VALUES"."('".$addressbookid."','".$vcard."','".$uri."','".$lastmodified."','".$etag."','".$size."','".$uid."')";
             $insert_query=mysqli_query($link_db, $insert) or die("Query failed");
             $cardid = mysqli_insert_id($link_db);
@@ -150,46 +158,86 @@ function add_new ($ldap_array, $addressbookid, $select_query_mail, $host, $user,
             fwrite($w,(date(DATE_RFC822)));
             fwrite($w," добавлен новый пользователь ".$display_name." с адресом ".$primary_email. "\n");
             mysqli_close($link_db);
+        } else {
+            // update record
+            // samoilov 23.10.2020 check last_update
+            if ($check_result[1] < $last_update_exim) {
+                //echo "update of user!";
+                $link_db=connect_to_db ($host_cloud, $user, $passwd);
+                // sql query to find uid
+                $select_4="SELECT * FROM ".$db_cloud.".".$db_dst." WHERE carddata like '%EMAIL;TYPE=\"HOME,INTERNET,pref\":".$primary_email."%' and addressbookid='".$addressbookid."'";
+            $select_query_4=mysqli_query($link_db, $select_4) or die("Query failed");
+                while ($select_array_4 = mysqli_fetch_array($select_query_4, MYSQLI_ASSOC)) {
+                    $cardid=$select_array_4["id"];
+                    $uid=$select_array_4["uid"];
+                    $uri=$select_array_4["uri"];
+                };
+                $update="UPDATE ".$db_cloud.".".$db_dst." SET `carddata`='".$vcard."', `lastmodified`='".$lastmodified."', `etag`='".$etag."', `size`='".$size."' WHERE id='".$cardid."'";
+                $update_query=mysqli_query($link_db, $update) or die("Query failed");
+                //$cardid = mysqli_insert_id($link_db);
+                foreach ($vcard_array as $name => $value) {
+                    //$update_3="INSERT INTO ".$db_cloud.".".$db_dst_2." (`id`,`addressbookid`,`cardid`,`name`, `value`, `preferred`) VALUES"."(NULL, '".$addressbookid."','".$cardid."','".$name."','".$value."',0)";
+                    $update_3="UPDATE ".$db_cloud.".".$db_dst_2." SET `value`='".$value."', `preferred`=0 WHERE `name`='".$name."' AND `addressbookid`='".$addressbookid."' AND `cardid`='".$cardid."'";
+                    //echo $update_3;
+                    $update_query_3=mysqli_query($link_db, $update_3) or die("Query failed");
+                }
+
+                $select_3="SELECT synctoken from ".$db_cloud.".".$db_dst_4." WHERE id='".$addressbookid."'";
+            $select_query_3=mysqli_query($link_db, $select_3) or die("Query failed");
+            while ($select_array_3 = mysqli_fetch_array($select_query_3, MYSQLI_ASSOC)) {
+                        $synctoken=$select_array_3["synctoken"];
+            }
+                // operations: 1 - add, 2 - modify, 3 - delete
+                $insert="INSERT INTO ".$db_cloud.".".$db_dst_3." (`uri`,`synctoken`,`addressbookid`,`operation`) VALUES"."('".$uri."','".$synctoken."', '".$addressbookid."', 2)";
+            $insert_query=mysqli_query($link_db, $insert) or die("Query failed");
+            $synctoken+=1;
+                $update_2="UPDATE ".$db_cloud.".".$db_dst_4." SET synctoken='".$synctoken."' WHERE id='".$addressbookid."'";
+            $update_query_2=mysqli_query($link_db, $update_2) or die("Query failed");
+                fwrite($w,(date(DATE_RFC822)));
+                fwrite($w," обновлены данные пользователя ".$display_name." с адресом ".$primary_email. "\n");
+                mysqli_close($link_db);
+            }
         }
+
     }
     fclose($w);
     return 0;
 }
 
-function check_existence ($addressbookid, $host, $user, $passwd, $db_cloud, $db_dst, $primary_email) {
-    $link_db=connect_to_db ($host, $user, $passwd);
+function check_existence ($addressbookid, $host_cloud, $user, $passwd, $db_cloud, $db_dst, $primary_email) {
+    $link_db=connect_to_db ($host_cloud, $user, $passwd);
     $check="SELECT * FROM ".$db_cloud.".".$db_dst." WHERE carddata LIKE '%EMAIL;TYPE=\"HOME,INTERNET,pref\":".$primary_email."%' AND addressbookid='".$addressbookid."'";
     $check_query=mysqli_query($link_db, $check) or die("Query failed");
     $check_array = mysqli_fetch_array($check_query, MYSQLI_ASSOC);
     if (mysqli_affected_rows($link_db)==0) {
-        return true;
+        return array(true, '');
     } else {
-        return false;
+        return array(false, $check_array["lastmodified"]);
     }
     mysqli_close($link_db);
 }
 
-function get_all_contacts_mail ($host, $user, $passwd, $db_mail, $db_src) {
-    $link_db=connect_to_db ($host, $user, $passwd);
+function get_all_contacts_mail ($host_db, $user, $passwd, $db_mail, $db_src) {
+    $link_db=connect_to_db ($host_db, $user, $passwd);
     $select="SELECT * FROM ".$db_mail.".".$db_src;"";
     $select_query=mysqli_query($link_db, $select) or die("Query failed");
     mysqli_close($link_db);
     return $select_query;
 }
 
-function get_all_contacts_cloud ($addressbookid, $host, $user, $passwd, $db_cloud, $db_dst) {
-    $link_db=connect_to_db ($host, $user, $passwd);
+function get_all_contacts_cloud ($addressbookid, $host_cloud, $user, $passwd, $db_cloud, $db_dst) {
+    $link_db=connect_to_db ($host_cloud, $user, $passwd);
     $select="SELECT carddata from ".$db_cloud.".".$db_dst." WHERE addressbookid='".$addressbookid."'";
     $select_query=mysqli_query($link_db, $select) or die("Query failed");
     mysqli_close($link_db);
     return $select_query;
 }
 
-function delete_nonexistent ($addressbookid, $temp_file, $host, $user, $passwd, $db_mail, $db_cloud, $db_src, $db_dst, $db_dst_3, $db_dst_4, $log) {
+function delete_nonexistent ($addressbookid, $temp_file, $host_db, $host_cloud, $user, $passwd, $db_mail, $db_cloud, $db_src, $db_dst, $db_dst_3, $db_dst_4, $log) {
     $email_string='';
     $i=0;
     $j=0;
-    $select_query_mail = get_all_contacts_mail($host, $user, $passwd, $db_mail, $db_src);
+    $select_query_mail = get_all_contacts_mail($host_db, $user, $passwd, $db_mail, $db_src);
 
 $w=fopen($log,'a');
 
@@ -214,17 +262,17 @@ $w=fopen($log,'a');
         {
             foreach ($vCard as $Index => $vCardPart)
             {   //echo OutputvCard($vCardPart)."\n";
-                $template=";".OutputvCard($vCardPart).";";
+        $template=";".OutputvCard($vCardPart).";";
                 if(strpos($email_string,$template) !== false){
                     $i=$i+1;
 
                 } else {
                     $j=$j+1;
 
-                    $link_db=connect_to_db ($host, $user, $passwd);
+                    $link_db=connect_to_db ($host_cloud, $user, $passwd);
 
                     $select_3="SELECT uri FROM ".$db_cloud.".".$db_dst." WHERE carddata LIKE '%EMAIL;TYPE=\"HOME,INTERNET,pref\":".OutputvCard($vCardPart)."%' AND addressbookid='".$addressbookid."'";
-                    //echo $select_3;
+            //echo $select_3;
                     $select_query_3=mysqli_query($link_db, $select_3) or die("Query failed");
                     while ($select_array_3 = mysqli_fetch_array($select_query_3, MYSQLI_ASSOC)) {
                         $uri=$select_array_3["uri"];
@@ -294,15 +342,15 @@ fclose($w);
 
 $ldap_array = get_ldap_photo();
 
-$select_query_mail = get_all_contacts_mail($host, $user, $passwd, $db_mail, $db_src);
+$select_query_mail = get_all_contacts_mail($host_db, $user, $passwd, $db_mail, $db_src);
 
-add_new($ldap_array, $addressbookid, $select_query_mail, $host, $user, $passwd, $db_cloud, $db_dst, $db_dst_2, $db_dst_3, $db_dst_4, $log);
+add_or_update ($ldap_array, $addressbookid, $select_query_mail, $host_cloud, $user, $passwd, $db_cloud, $db_dst, $db_dst_2, $db_dst_3, $db_dst_4, $log);
 
-$select_query_cloud = get_all_contacts_cloud($addressbookid, $host, $user, $passwd, $db_cloud, $db_dst);
+$select_query_cloud = get_all_contacts_cloud ($addressbookid, $host_cloud, $user, $passwd, $db_cloud, $db_dst);
 
-create_temp_file($temp_file,$select_query_cloud);
+create_temp_file ($temp_file,$select_query_cloud);
 
-delete_nonexistent ($addressbookid, $temp_file, $host, $user, $passwd, $db_mail, $db_cloud, $db_src, $db_dst, $db_dst_3, $db_dst_4, $log);
+delete_nonexistent ($addressbookid, $temp_file, $host_db, $host_cloud, $user, $passwd, $db_mail, $db_cloud, $db_src, $db_dst, $db_dst_3, $db_dst_4, $log);
 
 delete_temp_file($temp_file);
 
