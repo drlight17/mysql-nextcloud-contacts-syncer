@@ -6,7 +6,7 @@
  *
  * @link https://github.com/drlight17/mysql-nextcloud-contacts-syncer
  * @author Samoilov Yuri
- * @version 0.5
+ * @version 0.6
 */
 
 include("db-connect.inc"); // access db
@@ -238,7 +238,7 @@ function add_or_update ($ldap_array, $addressbookid, $select_query_mail, $host_c
 
 function check_existence ($addressbookid, $host_cloud, $user, $passwd, $db_cloud, $db_dst, $primary_email) {
     $link_db=connect_to_db ($host_cloud, $user, $passwd);
-    $check="SELECT * FROM ".$db_cloud.".".$db_dst." WHERE carddata LIKE '%EMAIL;TYPE=\"HOME,INTERNET,pref\":".$primary_email."%' AND addressbookid='".$addressbookid."'";
+    $check="SELECT * FROM ".$db_cloud.".".$db_dst." WHERE carddata LIKE '%:".$primary_email."%' AND addressbookid='".$addressbookid."'";
     $check_query=mysqli_query($link_db, $check) or die("Query failed");
     $check_array = mysqli_fetch_array($check_query, MYSQLI_ASSOC);
     if (mysqli_affected_rows($link_db)==0) {
